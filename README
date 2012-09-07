@@ -1,0 +1,7 @@
+`servo-viewer` is a very simple GLUT-based viewer for the Servo parallel browser engine.
+
+For security sandboxing purposes, the Servo engine is divided into two parts: a *renderer* (which
+is more or less the same for all applications) and the *application*. The viewer is designed to be
+a bare-bones application that simply pops up a window and displays accelerated web content using
+the venerable GLUT library.
+
