@@ -7,10 +7,10 @@ use mod opengles::gl2;
 use io_surface::{IOSurface, IOSurfaceID};
 use opengles::gl2::{GLenum, GLint, GLsizei, GLuint};
 
+use cast::transmute;
 use from_str::from_str;
 use libc::c_int;
 use pipes::SharedChan;
-use unsafe::transmute;
 
 fn fragment_shader_source() -> ~str {
     ~"
@@ -33,14 +33,10 @@ fn vertex_shader_source() -> ~str {
         attribute vec3 aVertexPosition;
         attribute vec2 aTextureCoord;
 
-        /*uniform mat4 uMVMatrix;
-        uniform mat4 uPMatrix;*/
-
         varying vec2 vTextureCoord;
 
         void main(void) {
-            gl_Position = /*uPMatrix * uMVMatrix **/
-                vec4(aVertexPosition, 1.0);
+            gl_Position = vec4(aVertexPosition, 1.0);
             vTextureCoord = aTextureCoord;
         }
     "
@@ -64,19 +60,23 @@ fn load_shader(source_str: ~str, shader_type: GLenum) -> GLuint {
 }
 
 struct shader_program {
-    let program: GLuint;
-    let aVertexPosition: c_int;
-    let aTextureCoord: c_int;
-    let uSampler: c_int;
+    program: GLuint,
+    aVertexPosition: c_int,
+    aTextureCoord: c_int,
+    uSampler: c_int
+}
 
-    new(program: GLuint) {
-        self.program = program;
-        self.aVertexPosition = gl2::get_attrib_location(program, ~"aVertexPosition");
-        self.aTextureCoord = gl2::get_attrib_location(program, ~"aTextureCoord");
-        self.uSampler = gl2::get_uniform_location(program, ~"uSampler");
+fn shader_program(program: GLuint) -> shader_program {
+    let aVertexPosition = gl2::get_attrib_location(program, ~"aVertexPosition");
+    let aTextureCoord = gl2::get_attrib_location(program, ~"aTextureCoord");
+    gl2::enable_vertex_attrib_array(aVertexPosition as GLuint);
+    gl2::enable_vertex_attrib_array(aTextureCoord as GLuint);
 
-        gl2::enable_vertex_attrib_array(self.aVertexPosition as GLuint);
-        gl2::enable_vertex_attrib_array(self.aTextureCoord as GLuint);
+    shader_program {
+        program: program,
+        aVertexPosition: aVertexPosition,
+        aTextureCoord: aTextureCoord,
+        uSampler: gl2::get_uniform_location(program, ~"uSampler")
     }
 }
 
@@ -102,22 +102,24 @@ fn init_buffers() -> (GLuint, GLuint) {
     let triangle_vertex_buffer = gl2::gen_buffers(1 as GLsizei)[0];
     gl2::bind_buffer(gl2::ARRAY_BUFFER, triangle_vertex_buffer);
 
+    let (n1, _0, _1) = (-1.0f32, 0.0f32, 1.0f32);
     let vertices = ~[
-        0.0f32, 1.0f32, 0.0f32,
-        1.0f32, 0.0f32, 0.0f32,
-        0.0f32, 0.0f32, 0.0f32
+        n1, _1, _0,
+        _1, _1, _0,
+        n1, n1, _0,
+        _1, n1, _0,
     ];
     gl2::buffer_data(gl2::ARRAY_BUFFER, vertices, gl2::STATIC_DRAW);
 
     let texture_coord_buffer = gl2::gen_buffers(1 as GLsizei)[0];
     gl2::bind_buffer(gl2::ARRAY_BUFFER, texture_coord_buffer);
 
-    let (_0, _1) = (0.0f32, 1.0f32);
+    let (_800, _600) = (800.0f32, 600.0f32);
     let vertices = ~[
-        _0, _0,
-        _0, _1,
-        _1, _0,
-        _1, _1
+        _0,   _600,
+        _800, _600,
+        _0,   _0,
+        _800, _0
     ];
 
     gl2::buffer_data(gl2::ARRAY_BUFFER, vertices, gl2::STATIC_DRAW);
@@ -130,7 +132,7 @@ fn draw_scene(shader_program: shader_program, vertex_buffer: GLuint, texture_coo
     gl2::enable(gl2::TEXTURE_2D);
     gl2::enable(gl2::TEXTURE_RECTANGLE_ARB);
 
-    gl2::clear_color(0.0f32, 1.0f32, 0.0f32, 1.0f32);
+    gl2::clear_color(1.0f32, 1.0f32, 1.0f32, 1.0f32);
     gl2::clear(gl2::COLOR_BUFFER_BIT);
 
     gl2::bind_texture(gl2::TEXTURE_RECTANGLE_ARB, texture);
@@ -143,15 +145,17 @@ fn draw_scene(shader_program: shader_program, vertex_buffer: GLuint, texture_coo
 
     gl2::uniform_1i(shader_program.uSampler, 0);
 
-    gl2::draw_arrays(gl2::TRIANGLE_STRIP, 0 as GLint, 3 as GLint);
+    gl2::draw_arrays(gl2::TRIANGLE_STRIP, 0 as GLint, 4 as GLint);
 }
 
 fn init_texture(surface: &IOSurface) -> GLuint {
     let texture = gl2::gen_textures(1)[0];
     gl2::bind_texture(gl2::TEXTURE_RECTANGLE_ARB, texture);
 
-    gl2::tex_parameter_i(gl2::TEXTURE_RECTANGLE_ARB, gl2::TEXTURE_WRAP_S, gl2::CLAMP_TO_EDGE as GLint);
-    gl2::tex_parameter_i(gl2::TEXTURE_RECTANGLE_ARB, gl2::TEXTURE_WRAP_T, gl2::CLAMP_TO_EDGE as GLint);
+    gl2::tex_parameter_i(gl2::TEXTURE_RECTANGLE_ARB, gl2::TEXTURE_WRAP_S,
+                         gl2::CLAMP_TO_EDGE as GLint);
+    gl2::tex_parameter_i(gl2::TEXTURE_RECTANGLE_ARB, gl2::TEXTURE_WRAP_T,
+                         gl2::CLAMP_TO_EDGE as GLint);
     gl2::tex_parameter_i(gl2::TEXTURE_RECTANGLE_ARB, gl2::TEXTURE_MAG_FILTER,
                          gl2::LINEAR as GLint);
     gl2::tex_parameter_i(gl2::TEXTURE_RECTANGLE_ARB, gl2::TEXTURE_MIN_FILTER,
@@ -159,7 +163,7 @@ fn init_texture(surface: &IOSurface) -> GLuint {
 
     unsafe {
         let cgl_context = cgl::CGLGetCurrentContext();
-        assert transmute(copy cgl_context) != 0;
+        assert 0 != transmute(copy cgl_context);
 
         let gl_error = cgl::CGLTexImageIOSurface2D(cgl_context,
                                                    gl2::TEXTURE_RECTANGLE_ARB,
@@ -206,7 +210,7 @@ struct Context {
     mut texture: Option<GLuint>
 }
 
-fn start_app(finish_chan: SharedChan<()>, surface_id: IOSurfaceID) {
+fn start_app(finish_chan: &SharedChan<()>, surface_id: IOSurfaceID) {
     glut::init();
     glut::init_display_mode(0);
     let window = glut::create_window(~"Servo Viewer");
@@ -216,7 +220,7 @@ fn start_app(finish_chan: SharedChan<()>, surface_id: IOSurfaceID) {
         texture: None
     };
 
-    do glut::display_func {
+    do glut::display_func |move context| {
         display_callback(context);
     }
 
@@ -225,13 +229,14 @@ fn start_app(finish_chan: SharedChan<()>, surface_id: IOSurfaceID) {
     }
 }
 
-fn main(args: ~[~str]) {
+fn main() {
+    let args = os::args();
     let surface_id: int = from_str(args[1]).get();
 
     let (finish_chan, finish_port) = pipes::stream();
-    let finish_chan = SharedChan(finish_chan);
-    do task::task().sched_mode(task::PlatformThread).spawn {
-        start_app(finish_chan, surface_id as IOSurfaceID);
+    let finish_chan = SharedChan(move finish_chan);
+    do task::task().sched_mode(task::PlatformThread).spawn |move finish_chan| {
+        start_app(&finish_chan, surface_id as IOSurfaceID);
     }
     finish_port.recv();
 }
